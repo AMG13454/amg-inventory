@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 const SESSION_COOKIE = 'auth-session';
 const THIRTY_DAYS    = 60 * 60 * 24 * 30;
 

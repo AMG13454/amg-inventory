@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
   const origin = new URL(request.url).origin;
   const response = NextResponse.redirect(`${origin}/login`, { status: 303 });

@@ -7,7 +7,7 @@ export default function NavBar() {
   const [role, setRole] = useState<'admin' | 'staff' | null>(null);
 
   useEffect(() => {
-    fetch('/api/auth/me', { cache: 'no-store' })
+    fetch(`/api/auth/me?t=${Date.now()}`, { cache: 'no-store' })
       .then(r => r.json())
       .then(d => setRole(d.role ?? null))
       .catch(() => setRole(null));
