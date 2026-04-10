@@ -3,7 +3,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Search, Plus, Edit2, Save, X, Minus, CheckCircle2, ChevronUp, ChevronDown, Folder, List, CheckSquare, Archive, Trash2, Barcode } from 'lucide-react';
-import { supabase } from '@/lib/supabase'; 
+import { supabase } from '@/lib/supabase';
+import dynamic from 'next/dynamic';
+
+const BarcodeScanner = dynamic(() => import('@/components/BarcodeScanner'), { ssr: false });
 
 const APPROVED_LOCATIONS = [
   "Procedure room 1",
@@ -33,6 +36,7 @@ export default function InventoryPage() {
   const [bulkCategory, setBulkCategory] = useState('');
   const [role, setRole] = useState<'admin' | 'staff' | null>(null);
   const isAdmin = role === 'admin';
+  const [showScanner, setShowScanner] = useState(false);
 
   const categoryStyles = [
     { text: 'text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20' },
@@ -276,11 +280,26 @@ export default function InventoryPage() {
         </div>
       )}
 
+      {/* Barcode Scanner Overlay */}
+      {showScanner && (
+        <BarcodeScanner
+          onScan={(value) => { setSearchTerm(value); setShowScanner(false); }}
+          onClose={() => setShowScanner(false)}
+        />
+      )}
+
       {/* Search */}
       <div className="flex flex-col md:flex-row items-center gap-4 mb-8">
         <div className="relative flex-1 w-full">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={20} />
-          <input type="text" placeholder="Search name, manufacturer, REF, or barcode..." className="w-full bg-[#1e293b] border border-slate-800 rounded-2xl py-4 pl-12 pr-4 text-white outline-none focus:ring-2 focus:ring-indigo-500" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+          <input type="text" placeholder="Search name, manufacturer, REF, or barcode..." className="w-full bg-[#1e293b] border border-slate-800 rounded-2xl py-4 pl-12 pr-16 text-white outline-none focus:ring-2 focus:ring-indigo-500" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+          <button
+            onClick={() => setShowScanner(true)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 bg-indigo-600 hover:bg-indigo-500 text-white p-2 rounded-xl transition border-none cursor-pointer"
+            title="Scan barcode"
+          >
+            <Barcode size={18} />
+          </button>
         </div>
         <label className={`flex items-center gap-3 cursor-pointer text-sm font-bold py-4 px-6 rounded-2xl border transition ${showArchived ? 'bg-indigo-600/20 border-indigo-500/50 text-indigo-300' : 'bg-[#1e293b] border-slate-800 text-slate-400 hover:text-white'}`}>
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="w-5 h-5 accent-indigo-500 cursor-pointer" />
