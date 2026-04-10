@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Search, Plus, Edit2, Save, X, Minus, CheckCircle2, ChevronUp, ChevronDown, Folder, List, CheckSquare, Archive, Trash2, Barcode } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
@@ -37,8 +37,7 @@ export default function InventoryPage() {
   const [role, setRole] = useState<'admin' | 'staff' | null>(null);
   const isAdmin = role === 'admin';
   const [showScanner, setShowScanner] = useState(false);
-  // 'search' | 'edit-barcode' | 'add-barcode'
-  const [scanTarget, setScanTarget] = useState<'search' | 'edit-barcode' | 'add-barcode'>('search');
+  const scanTargetRef = useRef<'search' | 'edit-barcode' | 'add-barcode'>('search');
   const [editBarcodeValue, setEditBarcodeValue] = useState('');
   const [addBarcodeValue, setAddBarcodeValue] = useState('');
 
@@ -292,8 +291,8 @@ export default function InventoryPage() {
       {showScanner && (
         <BarcodeScanner
           onScan={(value) => {
-            if (scanTarget === 'edit-barcode') setEditBarcodeValue(value);
-            else if (scanTarget === 'add-barcode') setAddBarcodeValue(value);
+            if (scanTargetRef.current === 'edit-barcode') setEditBarcodeValue(value);
+            else if (scanTargetRef.current === 'add-barcode') setAddBarcodeValue(value);
             else setSearchTerm(value);
             setShowScanner(false);
           }}
@@ -316,7 +315,7 @@ export default function InventoryPage() {
             </button>
           )}
           <button
-            onClick={() => { setScanTarget('search'); setShowScanner(true); }}
+            onClick={() => { scanTargetRef.current = 'search'; setShowScanner(true); }}
             className="absolute right-3 top-1/2 -translate-y-1/2 bg-indigo-600 hover:bg-indigo-500 text-white p-2 rounded-xl transition border-none cursor-pointer"
             title="Scan barcode"
           >
@@ -499,7 +498,7 @@ export default function InventoryPage() {
                 <div className="relative">
                   <input name="barcode" type="text" placeholder="Tap to type or scan..." className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 pr-12 text-white focus:border-indigo-500 outline-none" value={editBarcodeValue} onChange={(e) => setEditBarcodeValue(e.target.value)} disabled={editingItem.is_archived}/>
                   {!editingItem.is_archived && (
-                    <button type="button" onClick={() => { setScanTarget('edit-barcode'); setShowScanner(true); }} className="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 hover:bg-indigo-500 text-white p-2 rounded-lg transition border-none cursor-pointer" title="Scan barcode">
+                    <button type="button" onClick={() => { scanTargetRef.current = 'edit-barcode'; setShowScanner(true); }} className="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 hover:bg-indigo-500 text-white p-2 rounded-lg transition border-none cursor-pointer" title="Scan barcode">
                       <Barcode size={15} />
                     </button>
                   )}
@@ -587,7 +586,7 @@ export default function InventoryPage() {
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block text-indigo-400 flex items-center gap-1"><Barcode size={12}/> Barcode / UPC</label>
                 <div className="relative">
                   <input name="barcode" type="text" placeholder="Tap to type or scan..." className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 pr-12 text-white focus:border-indigo-500 outline-none" value={addBarcodeValue} onChange={(e) => setAddBarcodeValue(e.target.value)} />
-                  <button type="button" onClick={() => { setScanTarget('add-barcode'); setShowScanner(true); }} className="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 hover:bg-indigo-500 text-white p-2 rounded-lg transition border-none cursor-pointer" title="Scan barcode">
+                  <button type="button" onClick={() => { scanTargetRef.current = 'add-barcode'; setShowScanner(true); }} className="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 hover:bg-indigo-500 text-white p-2 rounded-lg transition border-none cursor-pointer" title="Scan barcode">
                     <Barcode size={15} />
                   </button>
                 </div>

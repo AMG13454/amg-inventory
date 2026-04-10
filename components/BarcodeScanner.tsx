@@ -10,34 +10,30 @@ interface BarcodeScannerProps {
 
 export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps) {
   const scannerRef = useRef<any>(null);
+  const startedRef = useRef(false);
+  const onScanRef = useRef(onScan);
   const containerId = 'amg-barcode-scanner';
   const [error, setError] = useState('');
-  const [started, setStarted] = useState(false);
+
+  // Keep onScanRef current so the scanner callback always calls the latest handler
+  useEffect(() => { onScanRef.current = onScan; }, [onScan]);
 
   useEffect(() => {
-    let scanner: any;
-
     const startScanner = async () => {
       try {
         const { Html5Qrcode } = await import('html5-qrcode');
-        scanner = new Html5Qrcode(containerId);
+        const scanner = new Html5Qrcode(containerId);
         scannerRef.current = scanner;
 
         await scanner.start(
-          { facingMode: 'environment' }, // rear camera
-          {
-            fps: 10,
-            qrbox: { width: 250, height: 180 },
-            aspectRatio: 1.5,
-          },
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: { width: 250, height: 180 }, aspectRatio: 1.5 },
           (decodedText: string) => {
-            // Barcode detected — pass up and close
-            onScan(decodedText);
-            onClose();
+            onScanRef.current(decodedText);
           },
-          () => {} // ignore per-frame errors
+          () => {}
         );
-        setStarted(true);
+        startedRef.current = true;
       } catch (err: any) {
         setError(err?.message ?? 'Could not access camera. Please allow camera access in your browser settings.');
       }
@@ -46,8 +42,9 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
     startScanner();
 
     return () => {
-      if (scannerRef.current && started) {
+      if (scannerRef.current && startedRef.current) {
         scannerRef.current.stop().catch(() => {});
+        startedRef.current = false;
       }
     };
   }, []);
