@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
-import { Package, AlertTriangle, XCircle, Clock, FileDown, ArrowRight, LayoutDashboard, Mail, ClipboardCheck } from 'lucide-react';
+import Image from 'next/image';
+import { Package, AlertTriangle, XCircle, Clock, FileDown, ArrowRight, Mail, ClipboardCheck } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -169,13 +170,11 @@ export default function Dashboard() {
       
       {/* Top Navigation / Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
-        <div className="flex items-center gap-3">
-          <div className="bg-indigo-500/20 p-3 rounded-2xl border border-indigo-500/30">
-            <LayoutDashboard className="text-indigo-400" size={28} />
-          </div>
+        <div className="flex items-center gap-4">
+          <Image src="/logo.png" alt="AMG Plastic Surgery" width={56} height={56} className="object-contain rounded-xl" />
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-white leading-tight">Clinic Dashboard</h1>
-            <p className="text-slate-400 text-sm font-medium">AMG Inventory Management</p>
+            <p className="text-slate-400 text-sm font-medium">AMG Plastic Surgery · Inventory Management</p>
           </div>
         </div>
         
