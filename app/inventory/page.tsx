@@ -37,6 +37,10 @@ export default function InventoryPage() {
   const [role, setRole] = useState<'admin' | 'staff' | null>(null);
   const isAdmin = role === 'admin';
   const [showScanner, setShowScanner] = useState(false);
+  // 'search' | 'edit-barcode' | 'add-barcode'
+  const [scanTarget, setScanTarget] = useState<'search' | 'edit-barcode' | 'add-barcode'>('search');
+  const [editBarcodeValue, setEditBarcodeValue] = useState('');
+  const [addBarcodeValue, setAddBarcodeValue] = useState('');
 
   const categoryStyles = [
     { text: 'text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20' },
@@ -52,6 +56,10 @@ export default function InventoryPage() {
     fetchInventory();
     fetch('/api/auth/me', { cache: 'no-store' }).then(r => r.json()).then(d => setRole(d.role ?? null));
   }, []);
+
+  useEffect(() => {
+    if (editingItem) setEditBarcodeValue(editingItem.barcode || '');
+  }, [editingItem]);
 
   async function fetchInventory() {
     const { data } = await supabase.from('supplies').select('*');
@@ -248,7 +256,7 @@ export default function InventoryPage() {
               <Folder size={16}/> Folders
             </button>
           </div>
-          <button onClick={() => setIsAddingNew(true)} className="bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded-xl flex items-center gap-2 font-bold text-white border-none cursor-pointer">
+          <button onClick={() => { setIsAddingNew(true); setAddBarcodeValue(''); }} className="bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded-xl flex items-center gap-2 font-bold text-white border-none cursor-pointer">
             <Plus size={18} /> Add New Item
           </button>
         </div>
@@ -283,7 +291,12 @@ export default function InventoryPage() {
       {/* Barcode Scanner Overlay */}
       {showScanner && (
         <BarcodeScanner
-          onScan={(value) => { setSearchTerm(value); setShowScanner(false); }}
+          onScan={(value) => {
+            if (scanTarget === 'edit-barcode') setEditBarcodeValue(value);
+            else if (scanTarget === 'add-barcode') setAddBarcodeValue(value);
+            else setSearchTerm(value);
+            setShowScanner(false);
+          }}
           onClose={() => setShowScanner(false)}
         />
       )}
@@ -292,9 +305,18 @@ export default function InventoryPage() {
       <div className="flex flex-col md:flex-row items-center gap-4 mb-8">
         <div className="relative flex-1 w-full">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={20} />
-          <input type="text" placeholder="Search name, manufacturer, REF, or barcode..." className="w-full bg-[#1e293b] border border-slate-800 rounded-2xl py-4 pl-12 pr-16 text-white outline-none focus:ring-2 focus:ring-indigo-500" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+          <input type="text" placeholder="Search name, manufacturer, REF, or barcode..." className={`w-full bg-[#1e293b] border border-slate-800 rounded-2xl py-4 pl-12 ${searchTerm ? 'pr-24' : 'pr-16'} text-white outline-none focus:ring-2 focus:ring-indigo-500`} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm('')}
+              className="absolute right-14 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1.5 rounded-lg transition border-none cursor-pointer bg-transparent"
+              title="Clear search"
+            >
+              <X size={16} />
+            </button>
+          )}
           <button
-            onClick={() => setShowScanner(true)}
+            onClick={() => { setScanTarget('search'); setShowScanner(true); }}
             className="absolute right-3 top-1/2 -translate-y-1/2 bg-indigo-600 hover:bg-indigo-500 text-white p-2 rounded-xl transition border-none cursor-pointer"
             title="Scan barcode"
           >
@@ -473,8 +495,15 @@ export default function InventoryPage() {
               </div>
 
               <div>
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block text-indigo-400 flex items-center gap-1"><Barcode size={12}/> Barcode / UPC (Scan on iPad Keyboard)</label>
-                <input name="barcode" type="text" placeholder="Tap and scan barcode..." className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white focus:border-indigo-500 outline-none" defaultValue={editingItem.barcode} disabled={editingItem.is_archived}/>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block text-indigo-400 flex items-center gap-1"><Barcode size={12}/> Barcode / UPC</label>
+                <div className="relative">
+                  <input name="barcode" type="text" placeholder="Tap to type or scan..." className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 pr-12 text-white focus:border-indigo-500 outline-none" value={editBarcodeValue} onChange={(e) => setEditBarcodeValue(e.target.value)} disabled={editingItem.is_archived}/>
+                  {!editingItem.is_archived && (
+                    <button type="button" onClick={() => { setScanTarget('edit-barcode'); setShowScanner(true); }} className="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 hover:bg-indigo-500 text-white p-2 rounded-lg transition border-none cursor-pointer" title="Scan barcode">
+                      <Barcode size={15} />
+                    </button>
+                  )}
+                </div>
               </div>
               
               <div className="grid grid-cols-2 gap-4">
@@ -555,8 +584,13 @@ export default function InventoryPage() {
               </div>
 
               <div>
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block text-indigo-400 flex items-center gap-1"><Barcode size={12}/> Barcode / UPC (Scan on iPad Keyboard)</label>
-                <input name="barcode" type="text" placeholder="Tap and scan barcode..." className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white focus:border-indigo-500 outline-none" />
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block text-indigo-400 flex items-center gap-1"><Barcode size={12}/> Barcode / UPC</label>
+                <div className="relative">
+                  <input name="barcode" type="text" placeholder="Tap to type or scan..." className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 pr-12 text-white focus:border-indigo-500 outline-none" value={addBarcodeValue} onChange={(e) => setAddBarcodeValue(e.target.value)} />
+                  <button type="button" onClick={() => { setScanTarget('add-barcode'); setShowScanner(true); }} className="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 hover:bg-indigo-500 text-white p-2 rounded-lg transition border-none cursor-pointer" title="Scan barcode">
+                    <Barcode size={15} />
+                  </button>
+                </div>
               </div>
               
               <div className="grid grid-cols-2 gap-4">
