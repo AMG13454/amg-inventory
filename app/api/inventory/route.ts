@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase, type Supply } from '@/lib/supabase';
+import { supabase, createServerClient, type Supply } from '@/lib/supabase';
+import { toISODate } from '@/lib/dates';
+import { toTitleCase } from '@/lib/strings';
 
 function enrich(items: Supply[]) {
   const today = new Date();
@@ -65,4 +67,30 @@ export async function GET(request: NextRequest) {
     enriched = enriched.filter((i) => i.isUrgent || i.isWarning);
 
   return NextResponse.json(enriched);
+}
+
+export async function POST(request: NextRequest) {
+  const body = await request.json();
+
+  if (!body.name?.trim())
+    return NextResponse.json({ error: 'Item name is required' }, { status: 400 });
+
+  const newItem = {
+    name: toTitleCase(body.name.trim()),
+    category: body.category || 'Uncategorized',
+    quantity: body.quantity || '0',
+    reorder_level: body.reorder_level || '0',
+    manufacturer: body.manufacturer?.trim() ? toTitleCase(body.manufacturer.trim()) : null,
+    ref_sku: body.ref_sku?.trim() || null,
+    barcode: body.barcode?.trim() || null,
+    location: body.location || null,
+    expiration_date: body.expiration_date?.trim() ? toISODate(body.expiration_date) : null,
+    is_archived: false,
+  };
+
+  const serverClient = createServerClient();
+  const { data, error } = await serverClient.from('supplies').insert([newItem]).select().single();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json(data, { status: 201 });
 }

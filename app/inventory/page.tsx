@@ -39,10 +39,13 @@ export default function InventoryPage() {
   const [showScanner, setShowScanner] = useState(false);
   const scanTargetRef = useRef<'search' | 'edit-barcode' | 'add-barcode'>('search');
   const [editValues, setEditValues] = useState<Record<string, string>>({});
-  const [addBarcodeValue, setAddBarcodeValue] = useState('');
+  const [addValues, setAddValues] = useState<Record<string, string>>({});
 
   const setEditField = (field: string, value: string) =>
     setEditValues(prev => ({ ...prev, [field]: value }));
+
+  const setAddField = (field: string, value: string) =>
+    setAddValues(prev => ({ ...prev, [field]: value }));
 
   const categoryStyles = [
     { text: 'text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20' },
@@ -203,25 +206,32 @@ export default function InventoryPage() {
 
   async function handleAddNew(e: React.FormEvent) {
     e.preventDefault();
-    const formData = new FormData(e.target as HTMLFormElement);
     const newItem = {
-      name: capitalizeFirstLetter(formData.get('name') as string), 
-      category: formData.get('category') || 'Uncategorized',
-      quantity: formData.get('quantity') || '0',
-      reorder_level: formData.get('reorder_level') || '0',
-      manufacturer: capitalizeWords(formData.get('manufacturer') as string),
-      ref_sku: formData.get('ref_sku'),
-      barcode: formData.get('barcode'),
-      location: formData.get('location'),
-      expiration_date: formData.get('expiration_date'),
-      is_archived: false 
+      name: addValues.name,
+      category: addValues.category || 'Uncategorized',
+      quantity: addValues.quantity || '0',
+      reorder_level: addValues.reorder_level || '0',
+      manufacturer: addValues.manufacturer,
+      ref_sku: addValues.ref_sku,
+      barcode: addValues.barcode,
+      location: addValues.location,
+      expiration_date: addValues.expiration_date,
     };
 
-    const { data, error } = await supabase.from('supplies').insert([newItem]).select();
-    if (!error && data) {
-      setItems([...items, data[0]]);
+    const res = await fetch('/api/inventory', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newItem),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      setItems([...items, data]);
       setIsAddingNew(false);
       triggerSuccess();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || 'Failed to add item. Please try again.');
     }
   }
 
@@ -277,7 +287,7 @@ export default function InventoryPage() {
               <Folder size={16}/> Folders
             </button>
           </div>
-          <button onClick={() => { setIsAddingNew(true); setAddBarcodeValue(''); }} className="bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded-xl flex items-center gap-2 font-bold text-white border-none cursor-pointer">
+          <button onClick={() => { setIsAddingNew(true); setAddValues({ name: '', category: categories[0] as string || '', location: APPROVED_LOCATIONS[0], manufacturer: '', ref_sku: '', barcode: '', quantity: '0', reorder_level: '5', expiration_date: '' }); }} className="bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded-xl flex items-center gap-2 font-bold text-white border-none cursor-pointer">
             <Plus size={18} /> Add New Item
           </button>
         </div>
@@ -314,7 +324,7 @@ export default function InventoryPage() {
         <BarcodeScanner
           onScan={(value) => {
             if (scanTargetRef.current === 'edit-barcode') setEditField('barcode', value);
-            else if (scanTargetRef.current === 'add-barcode') setAddBarcodeValue(value);
+            else if (scanTargetRef.current === 'add-barcode') setAddField('barcode', value);
             else setSearchTerm(value);
             setShowScanner(false);
           }}
@@ -603,19 +613,24 @@ export default function InventoryPage() {
             <div className="space-y-4">
               <div>
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Item Name</label>
-                <input name="name" type="text" placeholder="e.g. botox 100u" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white outline-none" required />
+                <div className="relative">
+                  <input name="name" type="text" placeholder="e.g. botox 100u" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 pr-10 text-white outline-none focus:border-indigo-500" value={addValues.name || ''} onChange={(e) => setAddField('name', e.target.value)} required />
+                  {addValues.name && (
+                    <button type="button" onClick={() => setAddField('name', '')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white bg-transparent border-none cursor-pointer p-0.5 rounded"><X size={14} /></button>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Category</label>
-                  <select name="category" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white outline-none appearance-none">
+                  <select name="category" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white outline-none appearance-none" value={addValues.category || ''} onChange={(e) => setAddField('category', e.target.value)}>
                     {categories.map(cat => <option key={cat as string} value={cat as string}>{cat as string}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Location</label>
-                  <select name="location" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white outline-none appearance-none">
+                  <select name="location" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white outline-none appearance-none" value={addValues.location || ''} onChange={(e) => setAddField('location', e.target.value)}>
                     {APPROVED_LOCATIONS.map(loc => <option key={loc} value={loc}>{loc}</option>)}
                   </select>
                 </div>
@@ -624,38 +639,66 @@ export default function InventoryPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Manufacturer</label>
-                  <input name="manufacturer" type="text" placeholder="e.g. allergan" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white focus:border-indigo-500 outline-none" />
+                  <div className="relative">
+                    <input name="manufacturer" type="text" placeholder="e.g. allergan" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 pr-10 text-white focus:border-indigo-500 outline-none" value={addValues.manufacturer || ''} onChange={(e) => setAddField('manufacturer', e.target.value)} />
+                    {addValues.manufacturer && (
+                      <button type="button" onClick={() => setAddField('manufacturer', '')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white bg-transparent border-none cursor-pointer p-0.5 rounded"><X size={14} /></button>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">REF / SKU</label>
-                  <input name="ref_sku" type="text" placeholder="REF-XXX" className="w-full bg-[#0f172a] border border-slate-800 rounded-xl p-3 text-white focus:border-indigo-500 outline-none" />
+                  <div className="relative">
+                    <input name="ref_sku" type="text" placeholder="REF-XXX" className="w-full bg-[#0f172a] border border-slate-800 rounded-xl p-3 pr-10 text-white focus:border-indigo-500 outline-none" value={addValues.ref_sku || ''} onChange={(e) => setAddField('ref_sku', e.target.value)} />
+                    {addValues.ref_sku && (
+                      <button type="button" onClick={() => setAddField('ref_sku', '')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white bg-transparent border-none cursor-pointer p-0.5 rounded"><X size={14} /></button>
+                    )}
+                  </div>
                 </div>
               </div>
 
               <div>
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block text-indigo-400 flex items-center gap-1"><Barcode size={12}/> Barcode / UPC</label>
                 <div className="relative">
-                  <input name="barcode" type="text" placeholder="Tap to type or scan..." className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 pr-12 text-white focus:border-indigo-500 outline-none" value={addBarcodeValue} onChange={(e) => setAddBarcodeValue(e.target.value)} />
+                  <input name="barcode" type="text" placeholder="Tap to type or scan..." className={`w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white focus:border-indigo-500 outline-none ${addValues.barcode ? 'pr-20' : 'pr-12'}`} value={addValues.barcode || ''} onChange={(e) => setAddField('barcode', e.target.value)} />
+                  {addValues.barcode && (
+                    <button type="button" onClick={() => setAddField('barcode', '')} className="absolute right-12 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white bg-transparent border-none cursor-pointer p-0.5 rounded" title="Clear barcode"><X size={14} /></button>
+                  )}
                   <button type="button" onClick={() => { scanTargetRef.current = 'add-barcode'; setShowScanner(true); }} className="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 hover:bg-indigo-500 text-white p-2 rounded-lg transition border-none cursor-pointer" title="Scan barcode">
                     <Barcode size={15} />
                   </button>
                 </div>
               </div>
-              
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Initial Quantity</label>
-                  <input name="quantity" type="number" defaultValue="0" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white outline-none" />
+                  <div className="relative">
+                    <input name="quantity" type="number" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 pr-10 text-white outline-none focus:border-indigo-500" value={addValues.quantity ?? '0'} onChange={(e) => setAddField('quantity', e.target.value)} />
+                    {addValues.quantity && addValues.quantity !== '0' && (
+                      <button type="button" onClick={() => setAddField('quantity', '0')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white bg-transparent border-none cursor-pointer p-0.5 rounded"><X size={14} /></button>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Reorder Level</label>
-                  <input name="reorder_level" type="number" defaultValue="5" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white outline-none" />
+                  <div className="relative">
+                    <input name="reorder_level" type="number" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 pr-10 text-white outline-none focus:border-indigo-500" value={addValues.reorder_level ?? '5'} onChange={(e) => setAddField('reorder_level', e.target.value)} />
+                    {addValues.reorder_level && addValues.reorder_level !== '0' && (
+                      <button type="button" onClick={() => setAddField('reorder_level', '0')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white bg-transparent border-none cursor-pointer p-0.5 rounded"><X size={14} /></button>
+                    )}
+                  </div>
                 </div>
               </div>
 
               <div>
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Expiration Date</label>
-                <input name="expiration_date" type="date" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white focus:border-indigo-500 outline-none" />
+                <div className="relative">
+                  <input name="expiration_date" type="date" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 pr-10 text-white focus:border-indigo-500 outline-none" value={addValues.expiration_date || ''} onChange={(e) => setAddField('expiration_date', e.target.value)} />
+                  {addValues.expiration_date && (
+                    <button type="button" onClick={() => setAddField('expiration_date', '')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white bg-transparent border-none cursor-pointer p-0.5 rounded"><X size={14} /></button>
+                  )}
+                </div>
               </div>
 
               <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-500 py-4 rounded-2xl font-bold mt-4 flex items-center justify-center gap-2 transition text-white shadow-lg border-none cursor-pointer group">
