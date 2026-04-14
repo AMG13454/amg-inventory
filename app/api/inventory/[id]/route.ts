@@ -3,7 +3,7 @@ import { createServerClient } from '@/lib/supabase';
 import { toISODate } from '@/lib/dates';
 import { toTitleCase } from '@/lib/strings';
 
-const ALLOWED = ['name', 'quantity', 'reorder_level', 'expiration_date', 'location', 'notes', 'needs_reorder', 'category', 'lot_number', 'ref_sku', 'manufacturer'];
+const ALLOWED = ['name', 'quantity', 'reorder_level', 'expiration_date', 'location', 'notes', 'needs_reorder', 'category', 'lot_number', 'ref_sku', 'manufacturer', 'barcode'];
 
 export async function PATCH(
   request: NextRequest,
@@ -30,9 +30,11 @@ export async function PATCH(
   if ('expiration_date' in updates)
     updates.expiration_date = toISODate(updates.expiration_date as string);
 
-  // Title-case the name on every save
+  // Title-case the name and manufacturer on every save
   if ('name' in updates && typeof updates.name === 'string' && updates.name.trim())
     updates.name = toTitleCase(updates.name as string);
+  if ('manufacturer' in updates && typeof updates.manufacturer === 'string' && updates.manufacturer.trim())
+    updates.manufacturer = toTitleCase(updates.manufacturer as string);
 
   // PostgreSQL rejects empty strings for nullable columns — use null instead
   for (const field of ['location', 'notes', 'reorder_level', 'name']) {

@@ -38,8 +38,11 @@ export default function InventoryPage() {
   const isAdmin = role === 'admin';
   const [showScanner, setShowScanner] = useState(false);
   const scanTargetRef = useRef<'search' | 'edit-barcode' | 'add-barcode'>('search');
-  const [editBarcodeValue, setEditBarcodeValue] = useState('');
+  const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [addBarcodeValue, setAddBarcodeValue] = useState('');
+
+  const setEditField = (field: string, value: string) =>
+    setEditValues(prev => ({ ...prev, [field]: value }));
 
   const categoryStyles = [
     { text: 'text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20' },
@@ -53,11 +56,22 @@ export default function InventoryPage() {
 
   useEffect(() => {
     fetchInventory();
-    fetch('/api/auth/me', { cache: 'no-store' }).then(r => r.json()).then(d => setRole(d.role ?? null));
+    fetch(`/api/auth/me?t=${Date.now()}`, { cache: 'no-store', credentials: 'include' }).then(r => r.json()).then(d => setRole(d.role ?? null));
   }, []);
 
   useEffect(() => {
-    if (editingItem) setEditBarcodeValue(editingItem.barcode || '');
+    if (editingItem) {
+      setEditValues({
+        name: editingItem.name || '',
+        category: editingItem.category || '',
+        location: editingItem.location || '',
+        manufacturer: editingItem.manufacturer || '',
+        ref_sku: editingItem.ref_sku || '',
+        barcode: editingItem.barcode || '',
+        reorder_level: editingItem.reorder_level || '',
+        expiration_date: editingItem.expiration_date || '',
+      });
+    }
   }, [editingItem]);
 
   async function fetchInventory() {
@@ -159,23 +173,31 @@ export default function InventoryPage() {
 
   async function handleFullSave(e: React.FormEvent) {
     e.preventDefault();
-    const formData = new FormData(e.target as HTMLFormElement);
     const updates = {
-      name: capitalizeFirstLetter(formData.get('name') as string),
-      category: formData.get('category') || 'Uncategorized',
-      manufacturer: capitalizeWords(formData.get('manufacturer') as string), 
-      ref_sku: formData.get('ref_sku'),
-      barcode: formData.get('barcode'),
-      location: formData.get('location'),
-      expiration_date: formData.get('expiration_date'),
-      reorder_level: formData.get('reorder_level'),
+      name: editValues.name,
+      category: editValues.category || 'Uncategorized',
+      manufacturer: editValues.manufacturer,
+      ref_sku: editValues.ref_sku,
+      barcode: editValues.barcode,
+      location: editValues.location,
+      expiration_date: editValues.expiration_date,
+      reorder_level: editValues.reorder_level,
     };
 
-    const { error } = await supabase.from('supplies').update(updates).eq('id', editingItem.id);
-    if (!error) {
-      setItems(items.map(item => item.id === editingItem.id ? { ...item, ...updates } : item));
+    const res = await fetch(`/api/inventory/${editingItem.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+
+    if (res.ok) {
+      const updatedItem = await res.json();
+      setItems(items.map(item => item.id === editingItem.id ? { ...item, ...updatedItem } : item));
       setEditingItem(null);
       triggerSuccess();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || 'Failed to save changes. Please try again.');
     }
   }
 
@@ -291,7 +313,7 @@ export default function InventoryPage() {
       {showScanner && (
         <BarcodeScanner
           onScan={(value) => {
-            if (scanTargetRef.current === 'edit-barcode') setEditBarcodeValue(value);
+            if (scanTargetRef.current === 'edit-barcode') setEditField('barcode', value);
             else if (scanTargetRef.current === 'add-barcode') setAddBarcodeValue(value);
             else setSearchTerm(value);
             setShowScanner(false);
@@ -383,7 +405,7 @@ export default function InventoryPage() {
                     <th className="p-5 cursor-pointer hover:text-white transition" onClick={() => requestSort('status')}>
                       <div className="flex items-center gap-1">Status {sortConfig.key === 'status' && (sortConfig.direction === 'asc' ? <ChevronUp size={14}/> : <ChevronDown size={14}/>)}</div>
                     </th>
-                    {isAdmin && <th className="p-5 text-center">Edit</th>}
+                    {role && <th className="p-5 text-center">Edit</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/50">
@@ -403,8 +425,8 @@ export default function InventoryPage() {
                             <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelection(item.id)} className="w-4 h-4 accent-indigo-500 cursor-pointer rounded" />
                           </td>
                         )}
-                        <td className="p-5" onClick={() => isAdmin && setEditingItem(item)} style={{ cursor: isAdmin ? 'pointer' : 'default' }}>
-                          <div className={`font-bold text-white text-lg transition ${isAdmin ? 'group-hover:text-indigo-300' : ''}`}>{item.name}</div>
+                        <td className="p-5" onClick={() => role && setEditingItem(item)} style={{ cursor: role ? 'pointer' : 'default' }}>
+                          <div className={`font-bold text-white text-lg transition ${role ? 'group-hover:text-indigo-300' : ''}`}>{item.name}</div>
                           <div className="text-[10px] mt-1 flex gap-2 items-center opacity-60">
                             <span className="text-indigo-400 font-bold uppercase">{item.manufacturer || 'Brand TBD'}</span>
                             <span className="text-slate-600">|</span>
@@ -417,12 +439,12 @@ export default function InventoryPage() {
                             )}
                           </div>
                         </td>
-                        <td className="p-5 text-sm" onClick={() => isAdmin && setEditingItem(item)} style={{ cursor: isAdmin ? 'pointer' : 'default' }}>
+                        <td className="p-5 text-sm" onClick={() => role && setEditingItem(item)} style={{ cursor: role ? 'pointer' : 'default' }}>
                           <span className={`px-3 py-1 rounded-lg border font-bold text-[10px] uppercase tracking-wider ${style.bg} ${style.text} ${style.border}`}>
                             {item.category || 'Uncategorized'}
                           </span>
                         </td>
-                        <td className="p-5 text-slate-400 text-sm transition" onClick={() => isAdmin && setEditingItem(item)} style={{ cursor: isAdmin ? 'pointer' : 'default' }}>{item.location || '---'}</td>
+                        <td className="p-5 text-slate-400 text-sm transition" onClick={() => role && setEditingItem(item)} style={{ cursor: role ? 'pointer' : 'default' }}>{item.location || '---'}</td>
                         <td className="p-5 text-center">
                           <div className="flex items-center justify-center gap-4 bg-[#0f172a] w-fit mx-auto px-3 py-1 rounded-xl border border-slate-800 shadow-inner">
                             <button onClick={() => updateQty(item.id, parseInt(item.quantity || '0') - 1)} className="text-slate-500 hover:text-rose-400 cursor-pointer bg-transparent border-none p-1" disabled={item.is_archived}><Minus size={16}/></button>
@@ -430,14 +452,14 @@ export default function InventoryPage() {
                             <button onClick={() => updateQty(item.id, parseInt(item.quantity || '0') + 1)} className="text-slate-500 hover:text-emerald-400 cursor-pointer bg-transparent border-none p-1" disabled={item.is_archived}><Plus size={16}/></button>
                           </div>
                         </td>
-                        <td className="p-5 text-sm text-slate-300 transition" onClick={() => isAdmin && setEditingItem(item)} style={{ cursor: isAdmin ? 'pointer' : 'default' }}>{item.expiration_date || '---'}</td>
+                        <td className="p-5 text-sm text-slate-300 transition" onClick={() => role && setEditingItem(item)} style={{ cursor: role ? 'pointer' : 'default' }}>{item.expiration_date || '---'}</td>
                         <td className="p-5">
                           <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter ${
                             item.is_archived ? 'bg-slate-700/50 text-slate-400 border border-slate-600' :
                             item.expired === 'true' || item.expired === true || item.expired === 'yes' || parseInt(item.quantity || '0') === 0 ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20' : parseInt(item.quantity || '0') <= parseInt(item.reorder_level || '0') ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
                           }`}>{getStatusText(item)}</span>
                         </td>
-                        {isAdmin && (
+                        {role && (
                           <td className="p-5 text-center">
                             <button onClick={() => setEditingItem(item)} className="p-2 hover:bg-indigo-500/20 rounded-lg text-indigo-400 transition cursor-pointer bg-transparent border-none"><Edit2 size={18} /></button>
                           </td>
@@ -464,19 +486,24 @@ export default function InventoryPage() {
             <div className="space-y-4">
               <div>
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Item Name</label>
-                <input name="name" type="text" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white outline-none" defaultValue={editingItem.name} required disabled={editingItem.is_archived}/>
+                <div className="relative">
+                  <input name="name" type="text" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 pr-10 text-white outline-none focus:border-indigo-500" value={editValues.name || ''} onChange={(e) => setEditField('name', e.target.value)} required disabled={editingItem.is_archived}/>
+                  {editValues.name && !editingItem.is_archived && (
+                    <button type="button" onClick={() => setEditField('name', '')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white bg-transparent border-none cursor-pointer p-0.5 rounded"><X size={14} /></button>
+                  )}
+                </div>
               </div>
               
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Category</label>
-                  <select name="category" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white outline-none appearance-none" defaultValue={editingItem.category} disabled={editingItem.is_archived}>
+                  <select name="category" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white outline-none appearance-none" value={editValues.category || ''} onChange={(e) => setEditField('category', e.target.value)} disabled={editingItem.is_archived}>
                     {categories.map(cat => <option key={cat as string} value={cat as string}>{cat as string}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Location</label>
-                  <select name="location" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white outline-none appearance-none" defaultValue={editingItem.location} disabled={editingItem.is_archived}>
+                  <select name="location" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white outline-none appearance-none" value={editValues.location || ''} onChange={(e) => setEditField('location', e.target.value)} disabled={editingItem.is_archived}>
                     {APPROVED_LOCATIONS.map(loc => <option key={loc} value={loc}>{loc}</option>)}
                   </select>
                 </div>
@@ -485,18 +512,31 @@ export default function InventoryPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Manufacturer</label>
-                  <input name="manufacturer" type="text" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white focus:border-indigo-500 outline-none" defaultValue={editingItem.manufacturer} disabled={editingItem.is_archived}/>
+                  <div className="relative">
+                    <input name="manufacturer" type="text" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 pr-10 text-white focus:border-indigo-500 outline-none" value={editValues.manufacturer || ''} onChange={(e) => setEditField('manufacturer', e.target.value)} disabled={editingItem.is_archived}/>
+                    {editValues.manufacturer && !editingItem.is_archived && (
+                      <button type="button" onClick={() => setEditField('manufacturer', '')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white bg-transparent border-none cursor-pointer p-0.5 rounded"><X size={14} /></button>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">REF / SKU</label>
-                  <input name="ref_sku" type="text" className="w-full bg-[#0f172a] border border-slate-800 rounded-xl p-3 text-white focus:border-indigo-500 outline-none" defaultValue={editingItem.ref_sku} disabled={editingItem.is_archived}/>
+                  <div className="relative">
+                    <input name="ref_sku" type="text" className="w-full bg-[#0f172a] border border-slate-800 rounded-xl p-3 pr-10 text-white focus:border-indigo-500 outline-none" value={editValues.ref_sku || ''} onChange={(e) => setEditField('ref_sku', e.target.value)} disabled={editingItem.is_archived}/>
+                    {editValues.ref_sku && !editingItem.is_archived && (
+                      <button type="button" onClick={() => setEditField('ref_sku', '')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white bg-transparent border-none cursor-pointer p-0.5 rounded"><X size={14} /></button>
+                    )}
+                  </div>
                 </div>
               </div>
 
               <div>
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block text-indigo-400 flex items-center gap-1"><Barcode size={12}/> Barcode / UPC</label>
                 <div className="relative">
-                  <input name="barcode" type="text" placeholder="Tap to type or scan..." className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 pr-12 text-white focus:border-indigo-500 outline-none" value={editBarcodeValue} onChange={(e) => setEditBarcodeValue(e.target.value)} disabled={editingItem.is_archived}/>
+                  <input name="barcode" type="text" placeholder="Tap to type or scan..." className={`w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white focus:border-indigo-500 outline-none ${!editingItem.is_archived ? (editValues.barcode ? 'pr-20' : 'pr-12') : ''}`} value={editValues.barcode || ''} onChange={(e) => setEditField('barcode', e.target.value)} disabled={editingItem.is_archived}/>
+                  {editValues.barcode && !editingItem.is_archived && (
+                    <button type="button" onClick={() => setEditField('barcode', '')} className="absolute right-12 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white bg-transparent border-none cursor-pointer p-0.5 rounded" title="Clear barcode"><X size={14} /></button>
+                  )}
                   {!editingItem.is_archived && (
                     <button type="button" onClick={() => { scanTargetRef.current = 'edit-barcode'; setShowScanner(true); }} className="absolute right-2 top-1/2 -translate-y-1/2 bg-indigo-600 hover:bg-indigo-500 text-white p-2 rounded-lg transition border-none cursor-pointer" title="Scan barcode">
                       <Barcode size={15} />
@@ -508,11 +548,21 @@ export default function InventoryPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Reorder Level</label>
-                  <input name="reorder_level" type="number" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white outline-none" defaultValue={editingItem.reorder_level} disabled={editingItem.is_archived}/>
+                  <div className="relative">
+                    <input name="reorder_level" type="number" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 pr-10 text-white outline-none focus:border-indigo-500" value={editValues.reorder_level || ''} onChange={(e) => setEditField('reorder_level', e.target.value)} disabled={editingItem.is_archived}/>
+                    {editValues.reorder_level && !editingItem.is_archived && (
+                      <button type="button" onClick={() => setEditField('reorder_level', '')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white bg-transparent border-none cursor-pointer p-0.5 rounded"><X size={14} /></button>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Expiration Date</label>
-                  <input name="expiration_date" type="date" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white outline-none" defaultValue={editingItem.expiration_date} disabled={editingItem.is_archived}/>
+                  <div className="relative">
+                    <input name="expiration_date" type="date" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 pr-10 text-white outline-none focus:border-indigo-500" value={editValues.expiration_date || ''} onChange={(e) => setEditField('expiration_date', e.target.value)} disabled={editingItem.is_archived}/>
+                    {editValues.expiration_date && !editingItem.is_archived && (
+                      <button type="button" onClick={() => setEditField('expiration_date', '')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white bg-transparent border-none cursor-pointer p-0.5 rounded"><X size={14} /></button>
+                    )}
+                  </div>
                 </div>
               </div>
 
