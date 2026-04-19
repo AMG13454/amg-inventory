@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { createServerClient, type Supply } from '@/lib/supabase';
 import { toISODate } from '@/lib/dates';
 import { toTitleCase } from '@/lib/strings';
+import { getCategoryRequirements } from '@/lib/categoryRules';
 
 // ── Input type ────────────────────────────────────────────────────────────────
 export type NewSupplyInput = {
@@ -13,6 +14,8 @@ export type NewSupplyInput = {
   description?: string;
   reorder_level?: string;
   expiration_date?: string;
+  no_expiration?: boolean;
+  lot_unknown?: boolean;
   location?: string;
   manufacturer?: string;
   notes?: string;
@@ -29,6 +32,7 @@ export type ActionResult =
 // ── Validation ────────────────────────────────────────────────────────────────
 function validate(input: NewSupplyInput): Partial<Record<keyof NewSupplyInput, string>> {
   const errors: Partial<Record<keyof NewSupplyInput, string>> = {};
+  const req = getCategoryRequirements(input.category);
 
   if (!input.name?.trim())
     errors.name = 'Name is required.';
@@ -38,6 +42,16 @@ function validate(input: NewSupplyInput): Partial<Record<keyof NewSupplyInput, s
 
   if (!input.location?.trim())
     errors.location = 'Location is required to save an item.';
+
+  if (req.requiresExpiration && !input.no_expiration) {
+    const exp = input.expiration_date?.trim() ?? '';
+    if (!exp) errors.expiration_date = 'Required for this category';
+  }
+
+  if (req.requiresLot && !input.lot_unknown) {
+    const lot = input.lot_number?.trim() ?? '';
+    if (!lot) errors.lot_number = 'Required for this category';
+  }
 
   if (
     input.expiration_date &&
@@ -62,7 +76,8 @@ export async function addInventoryItem(input: NewSupplyInput): Promise<ActionRes
     description:     input.description?.trim()     || null,
     quantity:        input.quantity.trim(),
     reorder_level:   input.reorder_level?.trim()   || null,
-    expiration_date: toISODate(input.expiration_date) ?? null,
+    expiration_date: input.no_expiration ? null : toISODate(input.expiration_date) ?? null,
+    no_expiration:   input.no_expiration ?? false,
     qty_on_reorder:  null,
     expired:         null,
     location:        input.location?.trim()        || null,
@@ -70,7 +85,8 @@ export async function addInventoryItem(input: NewSupplyInput): Promise<ActionRes
     notes:           input.notes?.trim()           || null,
     needs_reorder:   input.needs_reorder ?? false,
     category:        input.category?.trim()        || 'General Supplies',
-    lot_number:      input.lot_number?.trim()      || null,
+    lot_unknown:     input.lot_unknown ?? false,
+    lot_number:      input.lot_unknown ? null : input.lot_number?.trim() || null,
     updated_at:      new Date().toISOString(),
   };
 
@@ -85,6 +101,17 @@ export async function addInventoryItem(input: NewSupplyInput): Promise<ActionRes
   if (error) {
     console.error('[addInventoryItem]', error);
     return { success: false, errors: { name: error.message } };
+  }
+
+  if (data) {
+    await serverClient.from('supply_lot_entries').insert({
+      item_id: data.id,
+      lot_number: row.lot_number,
+      quantity: row.quantity,
+      expiration_date: row.expiration_date,
+      lot_unknown: row.lot_unknown,
+      created_at: new Date().toISOString(),
+    });
   }
 
   // 4. Revalidate so inventory lists reflect the new row immediately
@@ -231,14 +258,19 @@ export async function addItemAction(
   _prevState: FormState,
   formData: FormData,
 ): Promise<FormState> {
+  const noExpiration = formData.get('no_expiration') !== null;
+  const lotUnknown = formData.get('lot_unknown') !== null;
+
   const result = await addInventoryItem({
     name:            formData.get('name')            as string ?? '',
     quantity:        formData.get('quantity')        as string ?? '',
     category:        formData.get('category')        as string ?? 'General Supplies',
     location:        formData.get('location')        as string ?? '',
     reorder_level:   formData.get('reorder_level')   as string ?? '',
-    expiration_date: formData.get('expiration_date') as string ?? '',
-    lot_number:      formData.get('lot_number')      as string ?? '',
+    expiration_date: noExpiration ? '' : formData.get('expiration_date') as string ?? '',
+    no_expiration:   noExpiration,
+    lot_unknown:     lotUnknown,
+    lot_number:      lotUnknown ? '' : formData.get('lot_number') as string ?? '',
   });
 
   if (!result.success) return { success: false, errors: result.errors };

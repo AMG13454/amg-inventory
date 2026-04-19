@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabase, createServerClient, type Supply } from '@/lib/supabase';
 import { toISODate } from '@/lib/dates';
 import { toTitleCase } from '@/lib/strings';
+import { getCategoryRequirements } from '@/lib/categoryRules';
+
+function getCurrentUser(sessionValue: string | undefined) {
+  if (sessionValue === 'amg-admin') return { user_id: 'admin', user_display_name: 'Admin' };
+  if (sessionValue === 'amg-staff') return { user_id: 'staff', user_display_name: 'Staff' };
+  return { user_id: 'unknown', user_display_name: 'Unknown' };
+}
 
 function enrich(items: Supply[]) {
   const today = new Date();
@@ -84,13 +91,64 @@ export async function POST(request: NextRequest) {
     ref_sku: body.ref_sku?.trim() || null,
     barcode: body.barcode?.trim() || null,
     location: body.location || null,
-    expiration_date: body.expiration_date?.trim() ? toISODate(body.expiration_date) : null,
+    no_expiration: body.no_expiration === true || body.no_expiration === 'true',
+    expiration_date: body.no_expiration ? null : body.expiration_date?.trim() ? toISODate(body.expiration_date) : null,
+    lot_unknown: body.lot_unknown === true || body.lot_unknown === 'true',
+    lot_number: body.lot_unknown ? null : body.lot_number?.trim() || null,
     is_archived: false,
   };
+
+  const req = getCategoryRequirements(newItem.category);
+
+  if (req.requiresExpiration && !newItem.no_expiration && !newItem.expiration_date) {
+    return NextResponse.json(
+      { error: 'Required for this category', field: 'expiration_date' },
+      { status: 400 }
+    );
+  }
+
+  if (req.requiresLot && !newItem.lot_unknown && !newItem.lot_number) {
+    return NextResponse.json(
+      { error: 'Required for this category', field: 'lot_number' },
+      { status: 400 }
+    );
+  }
+
+  if (newItem.expiration_date && isNaN(Date.parse(String(newItem.expiration_date)))) {
+    return NextResponse.json(
+      { error: 'Expiration date must be a valid date (YYYY-MM-DD).', field: 'expiration_date' },
+      { status: 400 }
+    );
+  }
 
   const serverClient = createServerClient();
   const { data, error } = await serverClient.from('supplies').insert([newItem]).select().single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  if (data) {
+    await serverClient.from('supply_lot_entries').insert({
+      item_id: data.id,
+      lot_number: newItem.lot_number,
+      quantity: newItem.quantity,
+      expiration_date: newItem.expiration_date,
+      lot_unknown: newItem.lot_unknown,
+      created_at: new Date().toISOString(),
+    });
+
+    const sessionValue = request.cookies.get('auth-session')?.value;
+    const user = getCurrentUser(sessionValue);
+    await serverClient.from('supply_audit_log').insert({
+      item_id: data.id,
+      user_id: user.user_id,
+      user_display_name: user.user_display_name,
+      change_type: 'create',
+      field_name: 'item',
+      old_value: null,
+      new_value: JSON.stringify(newItem),
+      created_at: new Date().toISOString(),
+    });
+  }
+
   return NextResponse.json(data, { status: 201 });
 }

@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase';
 export async function GET() {
   const { data, error } = await supabase
     .from('supplies')
-    .select('expiration_date, needs_reorder')
+    .select('expiration_date, needs_reorder, no_expiration')
     .or('is_archived.eq.false,is_archived.is.null');
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -16,6 +16,7 @@ export async function GET() {
 
   for (const item of data ?? []) {
     if (item.needs_reorder) needsReorder++;
+    if (item.no_expiration) continue;
     if (item.expiration_date) {
       const exp = new Date(item.expiration_date);
       if (!isNaN(exp.getTime())) {

@@ -1,7 +1,13 @@
 'use client';
 
-import { useActionState, useEffect, useRef } from 'react';
+import { useActionState, useEffect, useRef, useState } from 'react';
 import { addItemAction, type FormState } from '@/app/actions/inventory';
+import { getCategoryRequirements } from '@/lib/categoryRules';
+
+type ClientErrors = Partial<{
+  expiration_date: string;
+  lot_number: string;
+}>;
 
 interface Props {
   open: boolean;
@@ -15,6 +21,13 @@ export default function AddItemDrawer({ open, onClose, onSuccess }: Props) {
   const [state, formAction, isPending] = useActionState(addItemAction, INITIAL_STATE);
   const formRef   = useRef<HTMLFormElement>(null);
   const nameRef   = useRef<HTMLInputElement>(null);
+  const [category, setCategory] = useState('General Supplies');
+  const [expirationDate, setExpirationDate] = useState('');
+  const [noExpiration, setNoExpiration] = useState(false);
+  const [lotNumber, setLotNumber] = useState('');
+  const [lotUnknown, setLotUnknown] = useState(false);
+  const [clientErrors, setClientErrors] = useState<ClientErrors>({});
+  const dangerousCategories = ['Injectables', 'PPE'];
 
   // Auto-focus Item Name whenever the drawer opens
   useEffect(() => {
@@ -26,12 +39,29 @@ export default function AddItemDrawer({ open, onClose, onSuccess }: Props) {
     if (state?.success) {
       const t = setTimeout(() => {
         formRef.current?.reset();
+        setCategory('General Supplies');
+        setExpirationDate('');
+        setNoExpiration(false);
+        setLotNumber('');
+        setLotUnknown(false);
+        setClientErrors({});
         onSuccess();
         onClose();
       }, 1200);
       return () => clearTimeout(t);
     }
   }, [state, onClose, onSuccess]);
+
+  useEffect(() => {
+    if (open) {
+      setCategory('General Supplies');
+      setExpirationDate('');
+      setNoExpiration(false);
+      setLotNumber('');
+      setLotUnknown(false);
+      setClientErrors({});
+    }
+  }, [open]);
 
   // Close on Escape
   useEffect(() => {
@@ -41,6 +71,30 @@ export default function AddItemDrawer({ open, onClose, onSuccess }: Props) {
   }, [onClose]);
 
   const errors = !state?.success ? state?.errors : undefined;
+  const expirationError = clientErrors.expiration_date ?? errors?.expiration_date;
+  const lotError = clientErrors.lot_number ?? errors?.lot_number;
+
+  function validateBeforeSubmit(): ClientErrors {
+    const req = getCategoryRequirements(category);
+    const next: ClientErrors = {};
+
+    if (req.requiresExpiration && !noExpiration && !expirationDate.trim())
+      next.expiration_date = 'Required for this category';
+
+    if (req.requiresLot && !lotUnknown && !lotNumber.trim())
+      next.lot_number = 'Required for this category';
+
+    return next;
+  }
+
+  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    const nextErrors = validateBeforeSubmit();
+    setClientErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      e.preventDefault();
+      return;
+    }
+  }
 
   return (
     <>
@@ -72,7 +126,7 @@ export default function AddItemDrawer({ open, onClose, onSuccess }: Props) {
         </div>
 
         {/* Form */}
-        <form ref={formRef} action={formAction} className="flex flex-col flex-1 overflow-y-auto">
+        <form ref={formRef} action={formAction} onSubmit={onSubmit} className="flex flex-col flex-1 overflow-y-auto">
           <div className="flex-1 px-6 py-6 space-y-5">
 
             {/* Item Name — auto-focused */}
@@ -99,7 +153,8 @@ export default function AddItemDrawer({ open, onClose, onSuccess }: Props) {
               <label className="block text-xs font-medium text-gray-500 mb-1.5">Category</label>
               <select
                 name="category"
-                defaultValue="General Supplies"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
               >
                 <option value="Injectables">Injectables</option>
@@ -108,9 +163,9 @@ export default function AddItemDrawer({ open, onClose, onSuccess }: Props) {
                 <option value="Surgical Tools">Surgical Tools</option>
                 <option value="Skin Care">Skin Care</option>
                 <option value="General Supplies">General Supplies</option>
-                <option value="Men's Garment">Men's Garment</option>
-                <option value="Women's Garment">Women's Garment</option>
-                <option value="Unisex Garment">Unisex Garment</option>
+                <option value="Men's Garments">Men's Garments</option>
+                <option value="Women's Garments">Women's Garments</option>
+                <option value="Unisex Garments">Unisex Garments</option>
               </select>
             </div>
 
@@ -165,16 +220,90 @@ export default function AddItemDrawer({ open, onClose, onSuccess }: Props) {
             {/* Reorder Level */}
             <FormField label="Reorder Level" name="reorder_level" placeholder="e.g. 10" />
 
-            {/* Expiration Date */}
-            <FormField
-              label="Expiration Date"
-              name="expiration_date"
-              placeholder="MM/DD/YY"
-              error={errors?.expiration_date}
-            />
+            <div className="grid gap-4">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-medium text-gray-500">Expiration Date</label>
+                  <label className="flex items-center gap-2 text-sm text-gray-500">
+                    <input
+                      type="checkbox"
+                      name="no_expiration"
+                      checked={noExpiration}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        if (checked && ['Injectables', 'PPE'].includes(category)) {
+                          const confirmed = window.confirm('Items in this category typically expire. Are you sure this item has no expiration date?');
+                          if (!confirmed) return;
+                        }
+                        setNoExpiration(checked);
+                        if (checked) {
+                          setExpirationDate('');
+                          setClientErrors((prev) => ({ ...prev, expiration_date: undefined }));
+                        }
+                      }}
+                      className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    No Expiration
+                  </label>
+                </div>
+                {noExpiration ? (
+                  <p className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-500 bg-slate-100">
+                    No Expiration
+                  </p>
+                ) : (
+                  <>
+                    <input
+                      type="date"
+                      name="expiration_date"
+                      value={expirationDate}
+                      onChange={(e) => {
+                        setExpirationDate(e.target.value);
+                        setClientErrors((prev) => ({ ...prev, expiration_date: undefined }));
+                      }}
+                      className={`w-full border rounded-lg px-3 py-2 text-base sm:text-sm focus:outline-none transition-colors ${expirationError ? 'border-red-300 bg-red-50 focus:ring-red-300' : 'border-gray-300 focus:ring-indigo-400'} bg-white text-gray-900`}
+                    />
+                    {expirationError && <p className="mt-1 text-xs text-red-600">{expirationError}</p>}
+                  </>
+                )}
+              </div>
 
-            {/* Lot Number */}
-            <FormField label="Lot Number" name="lot_number" placeholder="e.g. LOT-2024-A1" />
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">LOT / BATCH NUMBER</label>
+                <input
+                  type="text"
+                  name="lot_number_display"
+                  placeholder="e.g. L123456"
+                  value={lotUnknown ? 'LOT_UNKNOWN' : lotNumber}
+                  onChange={(e) => {
+                    setLotNumber(e.target.value);
+                    setClientErrors((prev) => ({ ...prev, lot_number: undefined }));
+                  }}
+                  disabled={lotUnknown}
+                  className={`w-full border rounded-lg px-3 py-2 text-base sm:text-sm focus:outline-none transition-colors ${lotError ? 'border-red-300 bg-red-50 focus:ring-red-300' : (lotUnknown ? 'border-gray-300' : 'border-gray-300 focus:ring-indigo-400')} ${lotUnknown ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : 'bg-white text-gray-900'}`}
+                />
+                <input type="hidden" name="lot_number" value={lotUnknown ? 'LOT_UNKNOWN' : lotNumber} />
+                {lotError && <p className="mt-1 text-xs text-red-600">{lotError}</p>}
+                <label className="flex items-center gap-2 mt-3 text-sm text-gray-500">
+                  <input
+                    type="checkbox"
+                    name="lot_unknown"
+                    checked={lotUnknown}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setLotUnknown(checked);
+                      if (checked) {
+                        setLotNumber('LOT_UNKNOWN');
+                        setClientErrors((prev) => ({ ...prev, lot_number: undefined }));
+                      } else {
+                        if (lotNumber === 'LOT_UNKNOWN') setLotNumber('');
+                      }
+                    }}
+                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  Lot Unknown
+                </label>
+              </div>
+            </div>
 
             {/* Success banner */}
             {state?.success && (

@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Package, AlertTriangle, XCircle, Clock, FileDown, ArrowRight, Mail, ClipboardCheck } from 'lucide-react';
+import { Package, AlertTriangle, XCircle, Clock, FileDown, ArrowRight, Mail, ClipboardCheck, AlertCircle, Tag } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -11,18 +11,41 @@ import autoTable from 'jspdf-autotable';
 export default function Dashboard() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState<'all' | 'out' | 'reorder' | 'expiring'>('all');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'out' | 'reorder' | 'expiring' | 'lotUnknown' | 'uncategorized'>('all');
   const [role, setRole] = useState<'admin' | 'staff' | null>(null);
+  const [specialCounts, setSpecialCounts] = useState({
+    lotUnknown: 0,
+    uncategorized: 0,
+  });
   const isAdmin = role === 'admin';
 
   useEffect(() => {
     fetchInventory();
-    fetch('/api/auth/me', { cache: 'no-store' }).then(r => r.json()).then(d => setRole(d.role ?? null));
+    fetch(`/api/auth/me?t=${Date.now()}`, { cache: 'no-store', credentials: 'include' }).then(r => r.json()).then(d => setRole(d.role ?? null));
   }, []);
 
   async function fetchInventory() {
     const { data } = await supabase.from('supplies').select('*');
     if (data) setItems(data);
+
+    const [{ count: lotUnknownCount }, { count: uncategorizedCount }] = await Promise.all([
+      supabase
+        .from('supplies')
+        .select('*', { count: 'exact', head: true })
+        .eq('lot_unknown', true)
+        .not('is_archived', 'eq', true),
+      supabase
+        .from('supplies')
+        .select('*', { count: 'exact', head: true })
+        .eq('category', 'Uncategorized')
+        .not('is_archived', 'eq', true),
+    ]);
+
+    setSpecialCounts({
+      lotUnknown: lotUnknownCount ?? 0,
+      uncategorized: uncategorizedCount ?? 0,
+    });
+
     setLoading(false);
   }
 
@@ -33,7 +56,8 @@ export default function Dashboard() {
   });
 
   // 2. Safe Date Checker (Flags anything within 60 days)
-  const isExpiringSoon = (dateString: string) => {
+  const isExpiringSoon = (dateString: string, noExpiration?: boolean) => {
+    if (noExpiration) return false;
     if (!dateString) return false;
     try {
       const expDate = new Date(dateString);
@@ -69,7 +93,7 @@ export default function Dashboard() {
       if (qty === 0) out++;
       else if (qty <= threshold) reorder++;
       
-      if (isExpiringSoon(item.expiration_date) || item.expired === 'true' || item.expired === true || item.expired === 'yes') expiring++;
+      if (isExpiringSoon(item.expiration_date, item.no_expiration) || item.expired === 'true' || item.expired === true || item.expired === 'yes') expiring++;
     });
 
     return { total: activeItems.length, out, reorder, expiring };
@@ -83,7 +107,9 @@ export default function Dashboard() {
       
       if (activeFilter === 'out') return qty === 0;
       if (activeFilter === 'reorder') return qty > 0 && qty <= threshold;
-      if (activeFilter === 'expiring') return isExpiringSoon(item.expiration_date) || item.expired === 'true' || item.expired === true || item.expired === 'yes';
+      if (activeFilter === 'expiring') return isExpiringSoon(item.expiration_date, item.no_expiration) || item.expired === 'true' || item.expired === true || item.expired === 'yes';
+      if (activeFilter === 'lotUnknown') return item.lot_unknown === true || item.lot_unknown === 'true';
+      if (activeFilter === 'uncategorized') return (item.category || 'Uncategorized') === 'Uncategorized';
       return true;
     });
   }, [activeItems, activeFilter]);
@@ -92,7 +118,9 @@ export default function Dashboard() {
     all: 'FULL INVENTORY',
     out: 'OUT OF STOCK',
     reorder: 'NEEDS REORDER',
-    expiring: 'EXPIRING SOON'
+    expiring: 'EXPIRING SOON',
+    lotUnknown: 'LOT UNKNOWN',
+    uncategorized: 'UNCATEGORIZED'
   };
 
   // 5. Generate Professional PDF (Updated with Manufacturer, Removed Status)
@@ -171,36 +199,50 @@ export default function Dashboard() {
       {/* Top Navigation / Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
         <div className="flex items-center gap-4">
-          <Image src="/logo.png" alt="AMG Plastic Surgery" width={56} height={56} className="object-contain rounded-xl" />
+          <div className="bg-slate-100 rounded-[6px] p-1 border border-slate-200/70">
+            <Image src="/logo.png" alt="AMG Plastic Surgery" width={64} height={64} className="object-contain rounded-[4px]" />
+          </div>
           <div>
-            <h1 className="text-3xl font-bold tracking-tight text-white leading-tight">Clinic Dashboard</h1>
+            <h1 className="text-4xl font-extrabold tracking-tight text-white leading-tight">AMG Dashboard</h1>
             <p className="text-slate-400 text-sm font-medium">AMG Plastic Surgery · Inventory Management</p>
           </div>
         </div>
         
         {/* Action Buttons */}
-<Link href="/audit" className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-emerald-600/10 border border-emerald-500/50 hover:bg-emerald-600 px-5 py-3 rounded-xl font-bold text-emerald-400 hover:text-white transition cursor-pointer no-underline">
-  <ClipboardCheck size={18} /> Run Audit
+<Link href="/audit" className="flex-1 md:flex-none flex items-center justify-center gap-3 bg-amber-500/10 border border-amber-400/50 hover:border-amber-300 hover:bg-amber-500/20 px-7 py-4 rounded-2xl text-base font-extrabold text-amber-300 hover:text-amber-100 transition shadow-lg shadow-amber-900/30 cursor-pointer no-underline">
+  <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-amber-400/20 border border-amber-300/40">
+    <ClipboardCheck size={19} className="text-amber-200" />
+  </span>
+  Run Audit
 </Link>
         <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
           {isAdmin && (
-            <button onClick={generateEmail} className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-[#1e293b] hover:bg-slate-800 border border-slate-700 px-5 py-3 rounded-xl font-bold text-slate-300 hover:text-white transition cursor-pointer">
-              <Mail size={18} className="text-emerald-400"/> Email List
+            <button onClick={generateEmail} className="flex-1 md:flex-none flex items-center justify-center gap-3 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-400/50 hover:border-blue-300 px-7 py-4 rounded-2xl text-base font-extrabold text-blue-300 hover:text-blue-100 transition shadow-lg shadow-blue-900/25 cursor-pointer">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-blue-400/20 border border-blue-300/40">
+                <Mail size={19} className="text-blue-200"/>
+              </span>
+              Email List
             </button>
           )}
           {isAdmin && (
-            <button onClick={generatePDF} className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-[#1e293b] hover:bg-slate-800 border border-slate-700 px-5 py-3 rounded-xl font-bold text-slate-300 hover:text-white transition cursor-pointer">
-              <FileDown size={18} className="text-indigo-400"/> Export PDF
+            <button onClick={generatePDF} className="flex-1 md:flex-none flex items-center justify-center gap-3 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-400/50 hover:border-rose-300 px-7 py-4 rounded-2xl text-base font-extrabold text-rose-300 hover:text-rose-100 transition shadow-lg shadow-rose-900/25 cursor-pointer">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-rose-400/20 border border-rose-300/40">
+                <FileDown size={19} className="text-rose-200"/>
+              </span>
+              Export PDF
             </button>
           )}
-          <Link href="/inventory" className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 px-6 py-3 rounded-xl font-bold text-white transition shadow-lg shadow-indigo-900/20 no-underline">
-            Full Inventory <ArrowRight size={18} />
+          <Link href="/inventory" className="flex-1 md:flex-none flex items-center justify-center gap-3 bg-violet-600/80 hover:bg-violet-500 border border-violet-400/60 hover:border-violet-300 px-7 py-4 rounded-2xl text-base font-extrabold text-white transition shadow-lg shadow-violet-900/35 no-underline">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-violet-300/20 border border-violet-200/40">
+              <ArrowRight size={19} className="text-violet-100" />
+            </span>
+            Full Inventory
           </Link>
         </div>
       </div>
 
       {/* STAT TOGGLES */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-10">
         <div onClick={() => setActiveFilter('all')} className={`p-6 rounded-3xl border cursor-pointer transition group relative overflow-hidden ${activeFilter === 'all' ? 'bg-indigo-600 border-indigo-500 shadow-xl shadow-indigo-900/30' : 'bg-[#1e293b] border-slate-800 hover:border-slate-600'}`}>
           <Package className={`mb-4 ${activeFilter === 'all' ? 'text-white' : 'text-indigo-400 group-hover:scale-110 transition'}`} size={32} />
           <h3 className={`text-3xl font-black mb-1 ${activeFilter === 'all' ? 'text-white' : 'text-slate-200'}`}>{stats.total}</h3>
@@ -221,6 +263,16 @@ export default function Dashboard() {
           <h3 className={`text-3xl font-black mb-1 ${activeFilter === 'expiring' ? 'text-white' : 'text-slate-200'}`}>{stats.expiring}</h3>
           <p className={`text-sm font-bold uppercase tracking-wider ${activeFilter === 'expiring' ? 'text-cyan-100' : 'text-slate-500'}`}>Expiring / Expired</p>
         </div>
+        <div onClick={() => setActiveFilter('lotUnknown')} className={`p-6 rounded-3xl border cursor-pointer transition group relative overflow-hidden ${activeFilter === 'lotUnknown' ? 'bg-amber-500 border-amber-400 shadow-xl shadow-amber-900/30' : 'bg-[#1e293b] border-slate-800 hover:border-slate-600'}`}>
+          <AlertCircle className={`mb-4 ${activeFilter === 'lotUnknown' ? 'text-white' : 'text-amber-400 group-hover:scale-110 transition'}`} size={32} />
+          <h3 className={`text-3xl font-black mb-1 ${activeFilter === 'lotUnknown' ? 'text-white' : 'text-slate-200'}`}>{specialCounts.lotUnknown}</h3>
+          <p className={`text-sm font-bold uppercase tracking-wider ${activeFilter === 'lotUnknown' ? 'text-amber-100' : 'text-slate-500'}`}>LOT UNKNOWN</p>
+        </div>
+        <div onClick={() => setActiveFilter('uncategorized')} className={`p-6 rounded-3xl border cursor-pointer transition group relative overflow-hidden ${activeFilter === 'uncategorized' ? 'bg-orange-500 border-orange-400 shadow-xl shadow-orange-900/30' : 'bg-[#1e293b] border-slate-800 hover:border-slate-600'}`}>
+          <Tag className={`mb-4 ${activeFilter === 'uncategorized' ? 'text-white' : 'text-orange-400 group-hover:scale-110 transition'}`} size={32} />
+          <h3 className={`text-3xl font-black mb-1 ${activeFilter === 'uncategorized' ? 'text-white' : 'text-slate-200'}`}>{specialCounts.uncategorized}</h3>
+          <p className={`text-sm font-bold uppercase tracking-wider ${activeFilter === 'uncategorized' ? 'text-orange-100' : 'text-slate-500'}`}>UNCATEGORIZED</p>
+        </div>
       </div>
 
       {/* QUICK VIEW TABLE */}
@@ -231,6 +283,8 @@ export default function Dashboard() {
             {activeFilter === 'reorder' && <span className="w-2 h-2 rounded-full bg-amber-500"></span>}
             {activeFilter === 'out' && <span className="w-2 h-2 rounded-full bg-rose-500"></span>}
             {activeFilter === 'expiring' && <span className="w-2 h-2 rounded-full bg-cyan-500"></span>}
+            {activeFilter === 'lotUnknown' && <span className="w-2 h-2 rounded-full bg-amber-500"></span>}
+            {activeFilter === 'uncategorized' && <span className="w-2 h-2 rounded-full bg-orange-500"></span>}
             Showing {filterNames[activeFilter]}
           </h2>
           <span className="text-sm font-bold text-slate-500 bg-slate-800 px-3 py-1 rounded-lg">{filteredItems.length} Results</span>
@@ -256,7 +310,14 @@ export default function Dashboard() {
                 <tr key={item.id} className="hover:bg-slate-800/30 transition group">
                   <td className="p-5">
                     <div className="font-bold text-white text-base">{item.name}</div>
-                    <div className="text-[10px] mt-1 text-slate-500 font-mono">REF: {item.ref_sku || '---'}</div>
+                    <div className="flex flex-wrap items-center gap-2 mt-1 text-[10px] text-slate-500 font-mono">
+                      <span>REF: {item.ref_sku || '---'}</span>
+                      {item.lot_unknown && (
+                        <span className="inline-flex items-center rounded-full bg-amber-500/15 border border-amber-400/30 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-200">
+                          LOT UNKNOWN
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="p-5 text-sm text-slate-300">{item.category || '---'}</td>
                   <td className="p-5 text-sm text-slate-400">{item.location || '---'}</td>

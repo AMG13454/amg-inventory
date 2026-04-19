@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowLeft, Search, Plus, Edit2, Save, X, Minus, CheckCircle2, ChevronUp, ChevronDown, Folder, List, CheckSquare, Archive, Trash2, Barcode } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import dynamic from 'next/dynamic';
+import { getCategoryRequirements } from '@/lib/categoryRules';
 
 const BarcodeScanner = dynamic(() => import('@/components/BarcodeScanner'), { ssr: false });
 
@@ -40,6 +41,12 @@ export default function InventoryPage() {
   const scanTargetRef = useRef<'search' | 'edit-barcode' | 'add-barcode'>('search');
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [addValues, setAddValues] = useState<Record<string, string>>({});
+  const [editNoExpiration, setEditNoExpiration] = useState(false);
+  const [editLotUnknown, setEditLotUnknown] = useState(false);
+  const [editErrors, setEditErrors] = useState<Partial<Record<'lot_number' | 'expiration_date', string>>>({});
+  const [addNoExpiration, setAddNoExpiration] = useState(false);
+  const [addLotUnknown, setAddLotUnknown] = useState(false);
+  const [addErrors, setAddErrors] = useState<Partial<Record<'lot_number' | 'expiration_date', string>>>({});
 
   const setEditField = (field: string, value: string) =>
     setEditValues(prev => ({ ...prev, [field]: value }));
@@ -70,10 +77,19 @@ export default function InventoryPage() {
         location: editingItem.location || '',
         manufacturer: editingItem.manufacturer || '',
         ref_sku: editingItem.ref_sku || '',
+        lot_number: editingItem.lot_number || '',
         barcode: editingItem.barcode || '',
         reorder_level: editingItem.reorder_level || '',
         expiration_date: editingItem.expiration_date || '',
       });
+      // Initialize from explicit DB booleans first, then fall back to legacy/sentinel checks.
+      const noExpiration = Boolean(editingItem.no_expiration);
+      const lotUnknown = Boolean(editingItem.lot_unknown) || editingItem.lot_number === 'LOT_UNKNOWN' || !editingItem.lot_number;
+
+      setEditNoExpiration(noExpiration);
+      setEditLotUnknown(lotUnknown);
+
+      if (noExpiration) setEditField('expiration_date', '');
     }
   }, [editingItem]);
 
@@ -134,6 +150,7 @@ export default function InventoryPage() {
                           item.manufacturer?.toLowerCase().includes(search) || 
                           item.ref_sku?.toLowerCase().includes(search) ||
                           item.barcode?.toLowerCase().includes(search) ||
+                          item.lot_number?.toLowerCase().includes(search) ||
                           item.category?.toLowerCase().includes(search);
     const matchesFolder = viewMode === 'folders' && activeFolder ? (item.category || 'Uncategorized') === activeFolder : true;
     const isArchived = item.is_archived === true || item.is_archived === 'true';
@@ -190,14 +207,29 @@ export default function InventoryPage() {
 
   async function handleFullSave(e: React.FormEvent) {
     e.preventDefault();
+    const req = getCategoryRequirements(editValues.category || editingItem?.category || 'Uncategorized');
+    const nextErrors: Partial<Record<'lot_number' | 'expiration_date', string>> = {};
+
+    if (req.requiresExpiration && !editNoExpiration && !(editValues.expiration_date || '').trim())
+      nextErrors.expiration_date = 'Required for this category';
+
+    if (req.requiresLot && !editLotUnknown && !(editValues.lot_number || '').trim())
+      nextErrors.lot_number = 'Required for this category';
+
+    setEditErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
+
     const updates = {
       name: editValues.name,
       category: editValues.category || 'Uncategorized',
       manufacturer: editValues.manufacturer,
       ref_sku: editValues.ref_sku,
+      lot_number: editLotUnknown ? null : (editValues.lot_number || null),
+      lot_unknown: editLotUnknown,
       barcode: editValues.barcode,
       location: editValues.location,
-      expiration_date: editValues.expiration_date,
+      expiration_date: editNoExpiration ? null : editValues.expiration_date,
+      no_expiration: editNoExpiration,
       reorder_level: editValues.reorder_level,
     };
 
@@ -211,6 +243,7 @@ export default function InventoryPage() {
       const updatedItem = await res.json();
       setItems(items.map(item => item.id === editingItem.id ? { ...item, ...updatedItem } : item));
       setEditingItem(null);
+      setEditErrors({});
       triggerSuccess();
     } else {
       const data = await res.json().catch(() => ({}));
@@ -220,6 +253,19 @@ export default function InventoryPage() {
 
   async function handleAddNew(e: React.FormEvent) {
     e.preventDefault();
+
+    const req = getCategoryRequirements(addValues.category || 'Uncategorized');
+    const nextErrors: Partial<Record<'lot_number' | 'expiration_date', string>> = {};
+
+    if (req.requiresExpiration && !addNoExpiration && !(addValues.expiration_date || '').trim())
+      nextErrors.expiration_date = 'Required for this category';
+
+    if (req.requiresLot && !addLotUnknown && !(addValues.lot_number || '').trim())
+      nextErrors.lot_number = 'Required for this category';
+
+    setAddErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
+
     const newItem = {
       name: addValues.name,
       category: addValues.category || 'Uncategorized',
@@ -227,9 +273,12 @@ export default function InventoryPage() {
       reorder_level: addValues.reorder_level || '0',
       manufacturer: addValues.manufacturer,
       ref_sku: addValues.ref_sku,
+      lot_number: addLotUnknown ? null : addValues.lot_number || null,
+      lot_unknown: addLotUnknown,
       barcode: addValues.barcode,
       location: addValues.location,
-      expiration_date: addValues.expiration_date,
+      expiration_date: addNoExpiration ? null : addValues.expiration_date,
+      no_expiration: addNoExpiration,
     };
 
     const res = await fetch('/api/inventory', {
@@ -242,6 +291,7 @@ export default function InventoryPage() {
       const data = await res.json();
       setItems([...items, data]);
       setIsAddingNew(false);
+      setAddErrors({});
       triggerSuccess();
     } else {
       const data = await res.json().catch(() => ({}));
@@ -315,7 +365,23 @@ export default function InventoryPage() {
               <Folder size={16}/> Folders
             </button>
           </div>
-          <button onClick={() => { setIsAddingNew(true); setAddValues({ name: '', category: categories[0] as string || '', location: APPROVED_LOCATIONS[0], manufacturer: '', ref_sku: '', barcode: '', quantity: '0', reorder_level: '5', expiration_date: '' }); }} className="bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded-xl flex items-center gap-2 font-bold text-white border-none cursor-pointer">
+          <button onClick={() => {
+              setIsAddingNew(true);
+              setAddValues({
+                name: '',
+                category: categories[0] as string || '',
+                location: APPROVED_LOCATIONS[0],
+                manufacturer: '',
+                ref_sku: '',
+                lot_number: '',
+                barcode: '',
+                quantity: '0',
+                reorder_level: '5',
+                expiration_date: '',
+              });
+              setAddNoExpiration(false);
+              setAddLotUnknown(false);
+            }} className="bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded-xl flex items-center gap-2 font-bold text-white border-none cursor-pointer">
             <Plus size={18} /> Add New Item
           </button>
         </div>
@@ -465,10 +531,15 @@ export default function InventoryPage() {
                         )}
                         <td className="p-5" onClick={() => role && setEditingItem(item)} style={{ cursor: role ? 'pointer' : 'default' }}>
                           <div className={`font-bold text-white text-lg transition ${role ? 'group-hover:text-indigo-300' : ''}`}>{item.name}</div>
-                          <div className="text-[10px] mt-1 flex gap-2 items-center opacity-60">
+                          <div className="text-[10px] mt-1 flex flex-wrap gap-2 items-center opacity-60">
                             <span className="text-indigo-400 font-bold uppercase">{item.manufacturer || 'Brand TBD'}</span>
                             <span className="text-slate-600">|</span>
                             <span className="font-mono">REF: {item.ref_sku || '---'}</span>
+                            {item.lot_number === 'LOT_UNKNOWN' && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-400/30 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-200">
+                                LOT UNKNOWN
+                              </span>
+                            )}
                             {item.barcode && (
                               <>
                                 <span className="text-slate-600">|</span>
@@ -569,6 +640,37 @@ export default function InventoryPage() {
               </div>
 
               <div>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">LOT / BATCH NUMBER</label>
+                <div className="relative">
+                  <input
+                    name="lot_number"
+                    type="text"
+                    placeholder="e.g. L123456"
+                    className={`w-full bg-[#0f172a] border rounded-xl p-3 pr-10 text-white focus:border-indigo-500 outline-none ${editErrors.lot_number ? 'border-rose-500 bg-rose-500/10' : 'border-slate-800'}`}
+                    value={editLotUnknown ? 'LOT_UNKNOWN' : (editValues.lot_number || '')}
+                    onChange={(e) => { setEditField('lot_number', e.target.value); setEditErrors(prev => ({ ...prev, lot_number: undefined })); }}
+                    disabled={editingItem.is_archived || editLotUnknown}
+                  />
+                  {!editingItem.is_archived && (
+                    <label className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2 text-slate-300 text-xs">
+                      <input type="checkbox" checked={editLotUnknown} onChange={(e) => {
+                        const checked = e.target.checked;
+                        if (checked && ['Injectables', 'PPE'].includes(editValues.category || editingItem?.category || '')) {
+                          const confirmed = window.confirm('Items in this category typically require a lot number. Are you sure the lot number is unknown?');
+                          if (!confirmed) return;
+                        }
+                        setEditLotUnknown(checked);
+                        setEditField('lot_number', checked ? 'LOT_UNKNOWN' : '');
+                        if (checked) setEditErrors(prev => ({ ...prev, lot_number: undefined }));
+                      }} className="h-4 w-4 rounded border-slate-600 text-indigo-500 bg-slate-900" />
+                      Lot Unknown
+                    </label>
+                  )}
+                </div>
+                {editErrors.lot_number && <p className="mt-2 text-xs font-bold text-rose-400">{editErrors.lot_number}</p>}
+              </div>
+
+              <div>
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block text-indigo-400 flex items-center gap-1"><Barcode size={12}/> Barcode / UPC</label>
                 <div className="relative">
                   <input name="barcode" type="text" placeholder="Tap to type or scan..." className={`w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 text-white focus:border-indigo-500 outline-none ${!editingItem.is_archived ? (editValues.barcode ? 'pr-20' : 'pr-12') : ''}`} value={editValues.barcode || ''} onChange={(e) => setEditField('barcode', e.target.value)} disabled={editingItem.is_archived}/>
@@ -594,13 +696,36 @@ export default function InventoryPage() {
                   </div>
                 </div>
                 <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Expiration Date</label>
-                  <div className="relative">
-                    <input name="expiration_date" type="date" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 pr-10 text-white outline-none focus:border-indigo-500" value={editValues.expiration_date || ''} onChange={(e) => setEditField('expiration_date', e.target.value)} disabled={editingItem.is_archived}/>
-                    {editValues.expiration_date && !editingItem.is_archived && (
-                      <button type="button" onClick={() => setEditField('expiration_date', '')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white bg-transparent border-none cursor-pointer p-0.5 rounded"><X size={14} /></button>
-                    )}
-                  </div>
+                  <div className="flex items-center justify-between gap-4 mb-1.5">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Expiration Date</label>
+                  <label className="flex items-center gap-2 text-xs text-slate-400">
+                    <input type="checkbox" checked={editNoExpiration} onChange={(e) => {
+                      const checked = e.target.checked;
+                      if (checked && ['Injectables', 'PPE'].includes(editValues.category || '')) {
+                        const confirmed = window.confirm('Items in this category typically expire. Are you sure this item has no expiration date?');
+                        if (!confirmed) return;
+                      }
+                      setEditNoExpiration(checked);
+                      if (checked) { setEditField('expiration_date', ''); setEditErrors(prev => ({ ...prev, expiration_date: undefined })); }
+                    }} className="h-4 w-4 rounded border-slate-700 text-indigo-500 bg-[#0f172a]" />
+                    No Expiration
+                  </label>
+                </div>
+                <div className="relative">
+                  {editNoExpiration ? (
+                    <p className="w-full bg-slate-900/60 border border-slate-700 rounded-xl p-3 text-sm text-slate-500">
+                      No Expiration
+                    </p>
+                  ) : (
+                    <>
+                      <input name="expiration_date" type="date" className={`w-full bg-[#0f172a] border rounded-xl p-3 pr-10 text-white outline-none focus:border-indigo-500 ${editErrors.expiration_date ? 'border-rose-500 bg-rose-500/10' : 'border-slate-700'}`} value={editValues.expiration_date || ''} onChange={(e) => { setEditField('expiration_date', e.target.value); setEditErrors(prev => ({ ...prev, expiration_date: undefined })); }} disabled={editingItem.is_archived}/>
+                      {editValues.expiration_date && !editingItem.is_archived && (
+                        <button type="button" onClick={() => setEditField('expiration_date', '')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white bg-transparent border-none cursor-pointer p-0.5 rounded"><X size={14} /></button>
+                      )}
+                    </>
+                  )}
+                </div>
+                {editErrors.expiration_date && <p className="mt-2 text-xs font-bold text-rose-400">{editErrors.expiration_date}</p>}
                 </div>
               </div>
 
@@ -663,6 +788,59 @@ export default function InventoryPage() {
                   </select>
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Manufacturer</label>
+                  <div className="relative">
+                    <input name="manufacturer" type="text" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 pr-10 text-white focus:border-indigo-500 outline-none" value={addValues.manufacturer || ''} onChange={(e) => setAddField('manufacturer', e.target.value)} />
+                    {addValues.manufacturer && (
+                      <button type="button" onClick={() => setAddField('manufacturer', '')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white bg-transparent border-none cursor-pointer p-0.5 rounded"><X size={14} /></button>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">REF / SKU</label>
+                  <div className="relative">
+                    <input name="ref_sku" type="text" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 pr-10 text-white focus:border-indigo-500 outline-none" value={addValues.ref_sku || ''} onChange={(e) => setAddField('ref_sku', e.target.value)} />
+                    {addValues.ref_sku && (
+                      <button type="button" onClick={() => setAddField('ref_sku', '')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white bg-transparent border-none cursor-pointer p-0.5 rounded"><X size={14} /></button>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">LOT / BATCH NUMBER</label>
+                <div className="relative">
+                  <input
+                    name="lot_number"
+                    type="text"
+                    placeholder="e.g. L123456"
+                    value={addLotUnknown ? 'LOT_UNKNOWN' : (addValues.lot_number || '')}
+                    onChange={(e) => { setAddField('lot_number', e.target.value); setAddErrors(prev => ({ ...prev, lot_number: undefined })); }}
+                    disabled={addLotUnknown}
+                    className={`w-full bg-[#0f172a] border rounded-xl p-3 text-white outline-none focus:border-indigo-500 ${addErrors.lot_number ? 'border-rose-500 bg-rose-500/10' : 'border-slate-700'} ${addLotUnknown ? 'bg-slate-900/60 text-slate-500 cursor-not-allowed' : ''}`}
+                  />
+                </div>
+                {addErrors.lot_number && <p className="mt-2 text-xs font-bold text-rose-400">{addErrors.lot_number}</p>}
+                <label className="flex items-center gap-2 mt-3 text-sm text-slate-400">
+                  <input
+                    type="checkbox"
+                    checked={addLotUnknown}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      if (checked && ['Injectables', 'PPE'].includes(addValues.category || '')) {
+                        const confirmed = window.confirm('Items in this category typically require a lot number. Are you sure the lot number is unknown?');
+                        if (!confirmed) return;
+                      }
+                      setAddLotUnknown(checked);
+                      setAddField('lot_number', checked ? 'LOT_UNKNOWN' : '');
+                      if (checked) setAddErrors(prev => ({ ...prev, lot_number: undefined }));
+                    }}
+                    className="h-4 w-4 rounded border-slate-600 text-indigo-500 bg-[#0f172a]"
+                  />
+                  Lot Unknown
+                </label>
+              </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -720,13 +898,41 @@ export default function InventoryPage() {
               </div>
 
               <div>
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Expiration Date</label>
+                <div className="flex items-center justify-between gap-4 mb-1.5">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Expiration Date</label>
+                  <label className="flex items-center gap-2 text-xs text-slate-400">
+                    <input
+                      type="checkbox"
+                      checked={addNoExpiration}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        if (checked && ['Injectables', 'PPE'].includes(addValues.category || '')) {
+                          const confirmed = window.confirm('Items in this category typically expire. Are you sure this item has no expiration date?');
+                          if (!confirmed) return;
+                        }
+                        setAddNoExpiration(checked);
+                        if (checked) { setAddField('expiration_date', ''); setAddErrors(prev => ({ ...prev, expiration_date: undefined })); }
+                      }}
+                      className="h-4 w-4 rounded border-slate-600 text-indigo-500 bg-[#0f172a]"
+                    />
+                    No Expiration
+                  </label>
+                </div>
                 <div className="relative">
-                  <input name="expiration_date" type="date" className="w-full bg-[#0f172a] border border-slate-700 rounded-xl p-3 pr-10 text-white focus:border-indigo-500 outline-none" value={addValues.expiration_date || ''} onChange={(e) => setAddField('expiration_date', e.target.value)} />
-                  {addValues.expiration_date && (
-                    <button type="button" onClick={() => setAddField('expiration_date', '')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white bg-transparent border-none cursor-pointer p-0.5 rounded"><X size={14} /></button>
+                  {addNoExpiration ? (
+                    <p className="w-full bg-slate-900/60 border border-slate-700 rounded-xl p-3 text-sm text-slate-500">
+                      No Expiration
+                    </p>
+                  ) : (
+                    <>
+                      <input name="expiration_date" type="date" className={`w-full bg-[#0f172a] border rounded-xl p-3 pr-10 text-white outline-none focus:border-indigo-500 ${addErrors.expiration_date ? 'border-rose-500 bg-rose-500/10' : 'border-slate-700'}`} value={addValues.expiration_date || ''} onChange={(e) => { setAddField('expiration_date', e.target.value); setAddErrors(prev => ({ ...prev, expiration_date: undefined })); }} />
+                      {addValues.expiration_date && (
+                        <button type="button" onClick={() => setAddField('expiration_date', '')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white bg-transparent border-none cursor-pointer p-0.5 rounded"><X size={14} /></button>
+                      )}
+                    </>
                   )}
                 </div>
+                {addErrors.expiration_date && <p className="mt-2 text-xs font-bold text-rose-400">{addErrors.expiration_date}</p>}
               </div>
 
               <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-500 py-4 rounded-2xl font-bold mt-4 flex items-center justify-center gap-2 transition text-white shadow-lg border-none cursor-pointer group">
