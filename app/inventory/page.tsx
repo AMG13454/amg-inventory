@@ -159,19 +159,33 @@ export default function InventoryPage() {
     if (bulkCategory) updates.category = bulkCategory;
     if (bulkLocation) updates.location = bulkLocation;
     const idsArray = Array.from(selectedIds);
-    const { error } = await supabase.from('supplies').update(updates).in('id', idsArray);
-    if (!error) {
+    const results = await Promise.all(
+      idsArray.map(id =>
+        fetch(`/api/inventory/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updates),
+        })
+      )
+    );
+    if (results.every(r => r.ok)) {
       setItems(items.map(item => selectedIds.has(item.id) ? { ...item, ...updates } : item));
       setSelectedIds(new Set());
       setBulkCategory('');
       setBulkLocation('');
       triggerSuccess();
+    } else {
+      alert('Some items could not be updated. Please try again.');
     }
   }
 
   async function updateQty(id: number, newQty: number) {
-    const { error } = await supabase.from('supplies').update({ quantity: newQty.toString() }).eq('id', id);
-    if (!error) setItems(items.map(item => item.id === id ? { ...item, quantity: newQty.toString() } : item));
+    const res = await fetch(`/api/inventory/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ quantity: newQty.toString() }),
+    });
+    if (res.ok) setItems(items.map(item => item.id === id ? { ...item, quantity: newQty.toString() } : item));
   }
 
   async function handleFullSave(e: React.FormEvent) {
@@ -239,22 +253,36 @@ export default function InventoryPage() {
     if (!editingItem) return;
     const isArchiving = !editingItem.is_archived;
     if (isArchiving && !window.confirm(`Are you sure you want to archive ${editingItem.name}?`)) return;
-    const { error } = await supabase.from('supplies').update({ is_archived: isArchiving }).eq('id', editingItem.id);
-    if (!error) {
+
+    const res = await fetch(`/api/inventory/${editingItem.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_archived: isArchiving }),
+    });
+
+    if (res.ok) {
       setItems(items.map(item => item.id === editingItem.id ? { ...item, is_archived: isArchiving } : item));
       setEditingItem(null);
       triggerSuccess();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || 'Failed to update item. Please try again.');
     }
   }
 
   async function handlePermanentDelete() {
     if (!editingItem) return;
     if (!window.confirm(`PERMANENTLY DELETE ${editingItem.name}?`)) return;
-    const { error } = await supabase.from('supplies').delete().eq('id', editingItem.id);
-    if (!error) {
+
+    const res = await fetch(`/api/inventory/${editingItem.id}`, { method: 'DELETE' });
+
+    if (res.ok) {
       setItems(items.filter(item => item.id !== editingItem.id));
       setEditingItem(null);
       triggerSuccess();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || 'Failed to delete item. Please try again.');
     }
   }
 

@@ -3,7 +3,7 @@ import { createServerClient } from '@/lib/supabase';
 import { toISODate } from '@/lib/dates';
 import { toTitleCase } from '@/lib/strings';
 
-const ALLOWED = ['name', 'quantity', 'reorder_level', 'expiration_date', 'location', 'notes', 'needs_reorder', 'category', 'lot_number', 'ref_sku', 'manufacturer', 'barcode'];
+const ALLOWED = ['name', 'quantity', 'reorder_level', 'expiration_date', 'location', 'notes', 'needs_reorder', 'category', 'lot_number', 'ref_sku', 'manufacturer', 'barcode', 'is_archived'];
 
 export async function PATCH(
   request: NextRequest,
@@ -22,9 +22,11 @@ export async function PATCH(
   if ('location' in updates && !updates.location)
     return NextResponse.json({ error: 'Location is required to save an item.' }, { status: 400 });
 
-  // needs_reorder comes in as 0/1 from the UI — coerce to boolean for Supabase
+  // Coerce boolean fields
   if ('needs_reorder' in updates)
     updates.needs_reorder = Boolean(updates.needs_reorder);
+  if ('is_archived' in updates)
+    updates.is_archived = Boolean(updates.is_archived);
 
   // Convert expiration_date from MM/DD/YY display format → YYYY-MM-DD for Postgres
   if ('expiration_date' in updates)
@@ -54,4 +56,20 @@ export async function PATCH(
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json(data);
+}
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+
+  const serverClient = createServerClient();
+  const { error } = await serverClient
+    .from('supplies')
+    .delete()
+    .eq('id', parseInt(id, 10));
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return new NextResponse(null, { status: 204 });
 }
